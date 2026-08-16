@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import type { SceneObject, WorldSettings } from './types'
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
+import type { SceneObject, Vec3, WorldSettings } from './types'
 
 interface ViewportProps {
   objects: SceneObject[]
@@ -9,8 +10,13 @@ interface ViewportProps {
   playing: boolean
   cameraMode: 'perspective' | 'top'
   worldSettings: WorldSettings
+  transformTool: 'select' | 'move' | 'rotate' | 'scale'
+  transformSpace: 'world' | 'local'
+  snapEnabled: boolean
+  snapSize: number
   onSelect: (id: string) => void
   onDropAsset: (assetId: string) => void
+  onTransform: (id: string, patch: { position: Vec3; rotation: Vec3; scale: Vec3 }) => void
   onWorldStats?: (stats: { chunks: number; blocks: number; center: string }) => void
 }
 
@@ -87,7 +93,8 @@ function buildPlayer(id: string) {
 function buildCustomObject(object: SceneObject) {
   const group = new THREE.Group()
   const texture = textureFromData(object.textureData)
-  const material = new THREE.MeshStandardMaterial({ color: object.color ?? '#9ba2a0', map: texture, roughness: .6, metalness: object.shape === 'sword' || object.shape === 'pickaxe' ? .45 : 0 })
+  const objectColor = object.color ?? '#9ba2a0'
+  const material = new THREE.MeshStandardMaterial({ color: objectColor, map: texture, roughness: (object.roughness ?? 60) / 100, metalness: (object.metallic ?? (object.shape === 'sword' || object.shape === 'pickaxe' ? 45 : 0)) / 100, emissive: objectColor, emissiveIntensity: (object.emission ?? 0) / 180 })
   const wood = new THREE.MeshStandardMaterial({ color: '#67452d', roughness: .9 })
   const add = (size: [number, number, number], position: [number, number, number], mat = material) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), mat); mesh.position.set(...position); mesh.castShadow = true; group.add(mesh); return mesh
@@ -151,21 +158,74 @@ function populateChunks(group: THREE.Group, centerX: number, centerZ: number, se
   return { chunks: chunkCount, blocks }
 }
 
-export default function Viewport3D({ objects, selectedId, playing, cameraMode, worldSettings, onSelect, onDropAsset, onWorldStats }: ViewportProps) {
+function buildWeather(group: THREE.Group, scene: THREE.Scene, settings: WorldSettings, sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight) {
+  group.clear()
+  const hour = settings.timeOfDay
+  const daylight = Math.max(.04, Math.sin(((hour - 6) / 12) * Math.PI))
+  const nightSky = new THREE.Color('#101827')
+  const daySky = new THREE.Color(settings.weather === 'Storm' ? '#59656a' : settings.weather === 'Rain' ? '#778c8d' : '#a9bea8')
+  const sky = nightSky.clone().lerp(daySky, Math.min(1, daylight))
+  scene.background = sky
+  if (scene.fog instanceof THREE.Fog) {
+    scene.fog.color.copy(sky)
+    scene.fog.near = settings.weather === 'Storm' ? 20 : settings.weather === 'Rain' || settings.weather === 'Snow' ? 28 : 42
+    scene.fog.far = settings.weather === 'Storm' ? 58 : settings.weather === 'Rain' || settings.weather === 'Snow' ? 76 : 115
+  }
+  sun.intensity = (settings.weather === 'Storm' ? .7 : settings.weather === 'Rain' ? 1.35 : 3.1) * daylight
+  sun.color.set(hour < 8 || hour > 18 ? '#e59a68' : '#fff4cf')
+  const sunAngle = ((hour - 6) / 24) * Math.PI * 2
+  sun.position.set(Math.cos(sunAngle) * 22, Math.max(2, Math.sin(sunAngle) * 26), 10)
+  hemi.intensity = .35 + daylight * (settings.weather === 'Storm' ? .65 : 1.8)
+
+  const clouds = new THREE.Group()
+  clouds.name = 'CloudLayer'
+  const cloudMaterial = new THREE.MeshLambertMaterial({ color: settings.weather === 'Storm' ? '#4b5457' : '#d9dfda', transparent: true, opacity: settings.weather === 'Clear' ? .28 : .68, depthWrite: false })
+  const cloudCount = settings.weather === 'Clear' ? 9 : 20
+  for (let index = 0; index < cloudCount; index++) {
+    const cloud = new THREE.Mesh(new THREE.BoxGeometry(5 + (index % 4) * 1.8, .45 + (index % 3) * .18, 2.3 + (index % 5) * .6), cloudMaterial)
+    cloud.position.set(((index * 17) % 70) - 35, 17 + (index % 4) * 1.1, ((index * 29) % 70) - 35)
+    clouds.add(cloud)
+  }
+  group.add(clouds)
+
+  if (settings.weather !== 'Clear' && settings.weatherIntensity > 0) {
+    const count = Math.floor(300 + settings.weatherIntensity * 12)
+    const positions = new Float32Array(count * 3)
+    for (let index = 0; index < count; index++) {
+      positions[index * 3] = ((index * 37.7) % 50) - 25
+      positions[index * 3 + 1] = ((index * 19.3) % 24) + 1
+      positions[index * 3 + 2] = ((index * 53.1) % 50) - 25
+    }
+    const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    const snow = settings.weather === 'Snow'
+    const material = new THREE.PointsMaterial({ color: snow ? '#edf4f4' : '#a9ced9', size: snow ? .15 : .07, transparent: true, opacity: snow ? .85 : .7, depthWrite: false })
+    const precipitation = new THREE.Points(geometry, material)
+    precipitation.name = snow ? 'SnowParticles' : settings.weather === 'Storm' ? 'StormParticles' : 'RainParticles'
+    group.add(precipitation)
+  }
+}
+
+export default function Viewport3D({ objects, selectedId, playing, cameraMode, worldSettings, transformTool, transformSpace, snapEnabled, snapSize, onSelect, onDropAsset, onTransform, onWorldStats }: ViewportProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const dynamicRef = useRef<THREE.Group | null>(null)
   const chunksRef = useRef<THREE.Group | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
+  const transformRef = useRef<TransformControls | null>(null)
   const selectionRef = useRef<THREE.BoxHelper | null>(null)
   const playerRef = useRef<THREE.Object3D | null>(null)
+  const weatherRef = useRef<THREE.Group | null>(null)
+  const sunRef = useRef<THREE.DirectionalLight | null>(null)
+  const hemiRef = useRef<THREE.HemisphereLight | null>(null)
   const onSelectRef = useRef(onSelect)
+  const onTransformRef = useRef(onTransform)
   const statsRef = useRef(onWorldStats)
   const playingRef = useRef(playing)
   const settingsRef = useRef(worldSettings)
   const loadedCenterRef = useRef('')
   onSelectRef.current = onSelect
+  onTransformRef.current = onTransform
   statsRef.current = onWorldStats
   playingRef.current = playing
   settingsRef.current = worldSettings
@@ -202,18 +262,36 @@ export default function Viewport3D({ objects, selectedId, playing, cameraMode, w
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true; controls.dampingFactor = .09; controls.target.set(0, 1, 0); controls.minDistance = 5; controls.maxDistance = 75; controls.maxPolarAngle = Math.PI * .48
     controlsRef.current = controls
-    scene.add(new THREE.HemisphereLight('#d9eee4', '#65523c', 2.1))
-    const sun = new THREE.DirectionalLight('#fff4cf', 3.1); sun.position.set(-9, 16, 9); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048)
+    const hemi = new THREE.HemisphereLight('#d9eee4', '#65523c', 2.1); hemiRef.current = hemi; scene.add(hemi)
+    const sun = new THREE.DirectionalLight('#fff4cf', 3.1); sunRef.current = sun; sun.position.set(-9, 16, 9); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048)
     sun.shadow.camera.left = -28; sun.shadow.camera.right = 28; sun.shadow.camera.top = 28; sun.shadow.camera.bottom = -28; scene.add(sun)
 
     const chunks = new THREE.Group(); chunks.name = 'infinite-chunk-stream'; chunksRef.current = chunks; scene.add(chunks)
     const dynamic = new THREE.Group(); dynamic.name = 'editor-objects'; dynamicRef.current = dynamic; scene.add(dynamic)
+    const weather = new THREE.Group(); weather.name = 'weather-system'; weatherRef.current = weather; scene.add(weather); buildWeather(weather, scene, settingsRef.current, sun, hemi)
+
+    const transformControls = new TransformControls(camera, renderer.domElement)
+    transformControls.size = .85
+    transformRef.current = transformControls
+    scene.add(transformControls.getHelper())
+    transformControls.addEventListener('dragging-changed', (event) => { controls.enabled = !Boolean(event.value) && !playingRef.current })
+    transformControls.addEventListener('mouseUp', () => {
+      const object = transformControls.object
+      const id = object?.userData.rootId as string | undefined
+      if (!object || !id) return
+      const toDegrees = (value: number) => value * 180 / Math.PI
+      onTransformRef.current(id, {
+        position: [object.position.x, object.position.y, object.position.z],
+        rotation: [toDegrees(object.rotation.x), toDegrees(object.rotation.y), toDegrees(object.rotation.z)],
+        scale: [object.scale.x, object.scale.y, object.scale.z],
+      })
+    })
     refreshTerrain(0, 0)
 
     const raycaster = new THREE.Raycaster(); const pointer = new THREE.Vector2(); let downX = 0; let downY = 0
     const pointerDown = (event: PointerEvent) => { downX = event.clientX; downY = event.clientY }
     const pointerUp = (event: PointerEvent) => {
-      if (playingRef.current || Math.hypot(event.clientX - downX, event.clientY - downY) > 4) return
+      if (playingRef.current || transformRef.current?.axis || Math.hypot(event.clientX - downX, event.clientY - downY) > 4) return
       const rect = renderer.domElement.getBoundingClientRect()
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1; pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
       raycaster.setFromCamera(pointer, camera)
@@ -228,11 +306,11 @@ export default function Viewport3D({ objects, selectedId, playing, cameraMode, w
 
     const resize = () => { if (!mount.clientWidth || !mount.clientHeight) return; camera.aspect = mount.clientWidth / mount.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(mount.clientWidth, mount.clientHeight) }
     const observer = new ResizeObserver(resize); observer.observe(mount)
-    let frame = 0; let verticalVelocity = 0; const clock = new THREE.Clock(); const forward = new THREE.Vector3(); const right = new THREE.Vector3(); const desiredCamera = new THREE.Vector3()
+    let frame = 0; let verticalVelocity = 0; let elapsed = 0; const clock = new THREE.Clock(); const forward = new THREE.Vector3(); const right = new THREE.Vector3(); const desiredCamera = new THREE.Vector3()
     const animate = () => {
       frame = requestAnimationFrame(animate)
-      const delta = Math.min(clock.getDelta(), .05)
-      controls.enabled = !playingRef.current
+      const delta = Math.min(clock.getDelta(), .05); elapsed += delta
+      controls.enabled = !playingRef.current && !transformRef.current?.dragging
       if (playingRef.current && playerRef.current) {
         camera.getWorldDirection(forward); forward.y = 0; forward.normalize(); right.crossVectors(forward, camera.up).normalize()
         const movement = new THREE.Vector3()
@@ -254,13 +332,38 @@ export default function Viewport3D({ objects, selectedId, playing, cameraMode, w
       } else {
         controls.update(); refreshTerrain(controls.target.x, controls.target.z)
       }
+      if (weatherRef.current) {
+        const focus = playingRef.current && playerRef.current ? playerRef.current.position : controls.target
+        weatherRef.current.position.x = focus.x
+        weatherRef.current.position.z = focus.z
+        const clouds = weatherRef.current.getObjectByName('CloudLayer')
+        if (clouds) clouds.position.x = ((elapsed * settingsRef.current.windSpeed * .018) % 35) - 17
+        const precipitation = weatherRef.current.children.find((child) => child.name.endsWith('Particles')) as THREE.Points | undefined
+        const positions = precipitation?.geometry.getAttribute('position') as THREE.BufferAttribute | undefined
+        if (positions) {
+          const snow = precipitation?.name === 'SnowParticles'
+          for (let index = 0; index < positions.count; index++) {
+            let y = positions.getY(index) - delta * (snow ? 2.2 : 15)
+            let x = positions.getX(index) + delta * settingsRef.current.windSpeed * (snow ? .012 : .02)
+            if (y < 0) y += 24
+            if (x > 25) x -= 50
+            positions.setXY(index, x, y)
+          }
+          positions.needsUpdate = true
+        }
+        if (settingsRef.current.weather === 'Storm' && sunRef.current) {
+          const daylight = Math.max(.04, Math.sin(((settingsRef.current.timeOfDay - 6) / 12) * Math.PI))
+          const flash = Math.sin(elapsed * .7) > .997 ? 8 : 0
+          sunRef.current.intensity = .7 * daylight + flash
+        }
+      }
       selectionRef.current?.update()
       renderer.render(scene, camera)
     }
     animate()
     return () => {
       cancelAnimationFrame(frame); observer.disconnect(); renderer.domElement.removeEventListener('pointerdown', pointerDown); renderer.domElement.removeEventListener('pointerup', pointerUp)
-      window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); controls.dispose(); renderer.dispose(); mount.removeChild(renderer.domElement); scene.clear()
+      window.removeEventListener('keydown', keyDown); window.removeEventListener('keyup', keyUp); transformControls.detach(); transformControls.dispose(); controls.dispose(); renderer.dispose(); mount.removeChild(renderer.domElement); scene.clear()
     }
   }, [])
 
@@ -268,11 +371,16 @@ export default function Viewport3D({ objects, selectedId, playing, cameraMode, w
     loadedCenterRef.current = ''
     const target = controlsRef.current?.target
     refreshTerrain(target?.x ?? 0, target?.z ?? 0)
-  }, [worldSettings])
+  }, [worldSettings.biome, worldSettings.chunkSize, worldSettings.infinite, worldSettings.renderDistance, worldSettings.seed])
+
+  useEffect(() => {
+    if (weatherRef.current && sceneRef.current && sunRef.current && hemiRef.current) buildWeather(weatherRef.current, sceneRef.current, worldSettings, sunRef.current, hemiRef.current)
+  }, [worldSettings.timeOfDay, worldSettings.weather, worldSettings.weatherIntensity, worldSettings.windSpeed])
 
   useEffect(() => {
     const dynamic = dynamicRef.current
     if (!dynamic) return
+    transformRef.current?.detach()
     dynamic.clear(); selectionRef.current = null; playerRef.current = null
     objects.filter((obj) => obj.visible && !['world', 'sun', 'ground', 'camera'].includes(obj.kind)).forEach((obj) => {
       let root: THREE.Object3D
@@ -288,9 +396,18 @@ export default function Viewport3D({ objects, selectedId, playing, cameraMode, w
       root.name = obj.name; root.position.set(...obj.position); root.rotation.set(obj.rotation[0] * Math.PI / 180, obj.rotation[1] * Math.PI / 180, obj.rotation[2] * Math.PI / 180); root.scale.set(...obj.scale); dynamic.add(root)
       if (obj.id === selectedId) {
         const helper = new THREE.BoxHelper(root, '#f2b84a'); (helper.material as THREE.LineBasicMaterial).depthTest = false; helper.renderOrder = 999; dynamic.add(helper); selectionRef.current = helper
+        if (!playing && transformTool !== 'select' && transformRef.current) {
+          const controls = transformRef.current
+          controls.setMode(transformTool === 'move' ? 'translate' : transformTool)
+          controls.setSpace(transformSpace)
+          controls.setTranslationSnap(snapEnabled ? snapSize : null)
+          controls.setRotationSnap(snapEnabled ? THREE.MathUtils.degToRad(15) : null)
+          controls.setScaleSnap(snapEnabled ? snapSize * .25 : null)
+          controls.attach(root)
+        }
       }
     })
-  }, [objects, playing, selectedId])
+  }, [objects, playing, selectedId, snapEnabled, snapSize, transformSpace, transformTool])
 
   useEffect(() => {
     const camera = cameraRef.current; const controls = controlsRef.current

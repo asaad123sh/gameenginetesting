@@ -1,13 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
 import {
-  Box, Braces, Check, ChevronRight, Code2, Component, Cpu, Cuboid, FileCode2, Grid3X3,
-  Hammer, ImagePlus, Layers3, PackagePlus, Paintbrush, Pickaxe, Plus, RotateCcw, Save,
+  Blend, Box, Braces, Check, ChevronRight, Code2, Component, Cpu, Cuboid, Eraser, FileCode2, FlipHorizontal2, Grid2X2, Grid3X3,
+  Hammer, ImagePlus, Layers3, PackagePlus, Paintbrush, PaintBucket, Pickaxe, Pipette, Plus, RotateCcw, Save,
   ShieldCheck, Sparkles, Swords, Trash2, Upload, WandSparkles, X,
 } from 'lucide-react'
 import ObjectPreview3D from './ObjectPreview3D'
 import type { CustomAsset, CustomShape, ScriptLanguage } from './types'
 
-const SIZE = 16
+const DEFAULT_TEXTURE_SIZE = 16
 const defaultPython = `from blocksmith import GameObject, event
 
 class CustomObject(GameObject):
@@ -65,8 +65,8 @@ const componentOptions = [
   { id: 'ParticleEmitter', detail: 'Spawn visual particles' },
 ]
 
-const makePixels = (base: string) => Array.from({ length: SIZE * SIZE }, (_, index) => {
-  if ((index * 7 + Math.floor(index / SIZE) * 11) % 23 === 0) return '#d8b35d'
+const makePixels = (base: string, size = DEFAULT_TEXTURE_SIZE) => Array.from({ length: size * size }, (_, index) => {
+  if ((index * 7 + Math.floor(index / size) * 11) % 23 === 0) return '#d8b35d'
   if ((index * 3) % 19 === 0) return '#2d332f'
   return base
 })
@@ -83,7 +83,14 @@ export default function ObjectStudio({ initial, onClose, onSave }: Props) {
   const [shape, setShape] = useState<CustomShape>(initial?.shape ?? 'sword')
   const [baseColor, setBaseColor] = useState(initial?.color ?? '#8c9a9b')
   const [brush, setBrush] = useState('#d8b35d')
+  const [textureSize, setTextureSize] = useState(() => Math.sqrt(initial?.textureData?.length ?? DEFAULT_TEXTURE_SIZE ** 2))
   const [pixels, setPixels] = useState<string[]>(initial?.textureData ?? makePixels('#7f8989'))
+  const [paintTool, setPaintTool] = useState<'brush' | 'fill' | 'eraser' | 'picker'>('brush')
+  const [mirrorPaint, setMirrorPaint] = useState(false)
+  const [showPixelGrid, setShowPixelGrid] = useState(true)
+  const [roughness, setRoughness] = useState(initial?.roughness ?? 72)
+  const [metallic, setMetallic] = useState(initial?.metallic ?? (shape === 'sword' || shape === 'pickaxe' ? 65 : 5))
+  const [emission, setEmission] = useState(initial?.emission ?? 0)
   const [language, setLanguage] = useState<ScriptLanguage>('python')
   const [pythonCode, setPythonCode] = useState(initial?.pythonCode ?? defaultPython)
   const [javaCode, setJavaCode] = useState(initial?.javaCode ?? defaultJava)
@@ -94,13 +101,54 @@ export default function ObjectStudio({ initial, onClose, onSave }: Props) {
   const palette = useMemo(() => ['#202522', '#4c5551', '#7f8989', '#d8b35d', '#9f563f', '#527448', '#446d82', '#e7e1ca'], [])
 
   const setPixel = (index: number) => {
-    setPixels((current) => current.map((pixel, pixelIndex) => pixelIndex === index ? brush : pixel))
+    if (paintTool === 'picker') {
+      setBrush(pixels[index])
+      setPaintTool('brush')
+      return
+    }
+    setPixels((current) => {
+      const next = [...current]
+      const replacement = paintTool === 'eraser' ? baseColor : brush
+      if (paintTool === 'fill') {
+        const target = next[index]
+        if (target === replacement) return next
+        const queue = [index]
+        const visited = new Set<number>()
+        while (queue.length) {
+          const point = queue.pop()!
+          if (visited.has(point) || next[point] !== target) continue
+          visited.add(point); next[point] = replacement
+          const x = point % textureSize; const y = Math.floor(point / textureSize)
+          if (x > 0) queue.push(point - 1)
+          if (x < textureSize - 1) queue.push(point + 1)
+          if (y > 0) queue.push(point - textureSize)
+          if (y < textureSize - 1) queue.push(point + textureSize)
+        }
+      } else {
+        next[index] = replacement
+        if (mirrorPaint) {
+          const x = index % textureSize; const y = Math.floor(index / textureSize)
+          next[y * textureSize + (textureSize - 1 - x)] = replacement
+        }
+      }
+      return next
+    })
     setCompiled(false)
+  }
+
+  const resizeTexture = (nextSize: number) => {
+    setPixels((current) => Array.from({ length: nextSize * nextSize }, (_, index) => {
+      const x = index % nextSize; const y = Math.floor(index / nextSize)
+      const sourceX = Math.min(textureSize - 1, Math.floor(x * textureSize / nextSize))
+      const sourceY = Math.min(textureSize - 1, Math.floor(y * textureSize / nextSize))
+      return current[sourceY * textureSize + sourceX]
+    }))
+    setTextureSize(nextSize)
   }
 
   const noiseTexture = () => {
     const colors = [baseColor, brush, '#303632', '#c6a657']
-    setPixels(Array.from({ length: SIZE * SIZE }, (_, index) => colors[(index * 17 + Math.floor(index / SIZE) * 7) % colors.length]))
+    setPixels(Array.from({ length: textureSize * textureSize }, (_, index) => colors[(index * 17 + Math.floor(index / textureSize) * 7) % colors.length]))
   }
 
   const importTexture = (file?: File) => {
@@ -110,12 +158,12 @@ export default function ObjectStudio({ initial, onClose, onSave }: Props) {
       const image = new Image()
       image.onload = () => {
         const canvas = document.createElement('canvas')
-        canvas.width = SIZE; canvas.height = SIZE
+        canvas.width = textureSize; canvas.height = textureSize
         const context = canvas.getContext('2d')!
         context.imageSmoothingEnabled = false
-        context.drawImage(image, 0, 0, SIZE, SIZE)
-        const data = context.getImageData(0, 0, SIZE, SIZE).data
-        setPixels(Array.from({ length: SIZE * SIZE }, (_, index) => `#${[data[index * 4], data[index * 4 + 1], data[index * 4 + 2]].map((value) => value.toString(16).padStart(2, '0')).join('')}`))
+        context.drawImage(image, 0, 0, textureSize, textureSize)
+        const data = context.getImageData(0, 0, textureSize, textureSize).data
+        setPixels(Array.from({ length: textureSize * textureSize }, (_, index) => `#${[data[index * 4], data[index * 4 + 1], data[index * 4 + 2]].map((value) => value.toString(16).padStart(2, '0')).join('')}`))
         setTab('texture')
       }
       image.src = String(reader.result)
@@ -135,6 +183,9 @@ export default function ObjectStudio({ initial, onClose, onSave }: Props) {
       pythonCode,
       javaCode,
       components,
+      roughness,
+      metallic,
+      emission,
       icon: shape,
     }
     onSave(asset)
@@ -169,21 +220,25 @@ export default function ObjectStudio({ initial, onClose, onSave }: Props) {
                   <div className="subheading">BASE GEOMETRY</div>
                   {shapeOptions.map((option) => { const Icon = option.icon; return <button key={option.id} className={shape === option.id ? 'selected' : ''} onClick={() => { setShape(option.id); setCompiled(false) }}><span><Icon size={20} /></span><div><strong>{option.name}</strong><small>{option.detail}</small></div>{shape === option.id && <Check size={13} />}</button> })}
                 </div>
-                <div className="large-object-preview"><ObjectPreview3D shape={shape} color={baseColor} textureData={pixels} wireframe={wireframe} /><div className="preview-label"><span><Sparkles size={12} /> REAL-TIME PREVIEW</span><small>DRAG TO ORBIT · SCROLL TO ZOOM</small></div><div className="preview-tools"><button className={!wireframe ? 'active' : ''} onClick={() => setWireframe(false)}>SOLID</button><button className={wireframe ? 'active' : ''} onClick={() => setWireframe(true)}>WIREFRAME</button></div></div>
+                <div className="large-object-preview"><ObjectPreview3D shape={shape} color={baseColor} textureData={pixels} wireframe={wireframe} roughness={roughness} metallic={metallic} emission={emission} /><div className="preview-label"><span><Sparkles size={12} /> REAL-TIME PREVIEW</span><small>DRAG TO ORBIT · SCROLL TO ZOOM</small></div><div className="preview-tools"><button className={!wireframe ? 'active' : ''} onClick={() => setWireframe(false)}>SOLID</button><button className={wireframe ? 'active' : ''} onClick={() => setWireframe(true)}>WIREFRAME</button></div></div>
               </div>
             </div>}
 
             {tab === 'texture' && <div className="texture-workspace">
-              <div className="studio-section-heading"><div><span>STEP 02</span><h2>Paint the texture</h2><p>Edit a crisp 16 × 16 pixel texture or import your own image.</p></div><button className="tool-button" onClick={() => uploadRef.current?.click()}><Upload size={14} /> IMPORT PNG</button><input hidden ref={uploadRef} type="file" accept="image/png,image/jpeg" onChange={(event) => importTexture(event.target.files?.[0])} /></div>
+              <div className="studio-section-heading texture-heading"><div><span>STEP 02</span><h2>Advanced texture authoring</h2><p>Paint, fill, mirror, import, and preview game-ready PBR pixel materials.</p></div><label className="resolution-select"><span>RESOLUTION</span><select value={textureSize} onChange={(event) => resizeTexture(Number(event.target.value))}><option value="16">16 × 16</option><option value="32">32 × 32</option><option value="64">64 × 64</option></select></label><button className="tool-button" onClick={() => uploadRef.current?.click()}><Upload size={14} /> IMPORT TEXTURE</button><input hidden ref={uploadRef} type="file" accept="image/png,image/jpeg" onChange={(event) => importTexture(event.target.files?.[0])} /></div>
               <div className="texture-editor-layout">
                 <div className="paint-tools">
-                  <div className="subheading">PALETTE</div>
+                  <div className="subheading">PAINT TOOLS</div>
+                  <div className="paint-tool-grid"><button className={paintTool === 'brush' ? 'active' : ''} onClick={() => setPaintTool('brush')} title="Pixel brush"><Paintbrush size={14} /></button><button className={paintTool === 'fill' ? 'active' : ''} onClick={() => setPaintTool('fill')} title="Flood fill"><PaintBucket size={14} /></button><button className={paintTool === 'eraser' ? 'active' : ''} onClick={() => setPaintTool('eraser')} title="Erase to base tint"><Eraser size={14} /></button><button className={paintTool === 'picker' ? 'active' : ''} onClick={() => setPaintTool('picker')} title="Pick color"><Pipette size={14} /></button></div>
+                  <div className="paint-toggles"><button className={mirrorPaint ? 'active' : ''} onClick={() => setMirrorPaint(!mirrorPaint)}><FlipHorizontal2 size={12} /> MIRROR X</button><button className={showPixelGrid ? 'active' : ''} onClick={() => setShowPixelGrid(!showPixelGrid)}><Grid2X2 size={12} /> GRID</button></div>
+                  <div className="subheading palette-title">PALETTE</div>
                   <div className="palette-grid">{palette.map((color) => <button key={color} className={brush === color ? 'active' : ''} style={{ backgroundColor: color }} onClick={() => setBrush(color)} title={color} />)}<label className="custom-color"><Plus size={13} /><input type="color" value={brush} onChange={(e) => setBrush(e.target.value)} /></label></div>
                   <label className="hex-field"><span>HEX</span><input value={brush.toUpperCase()} onChange={(event) => setBrush(event.target.value)} /></label>
-                  <div className="paint-actions"><button onClick={noiseTexture}><Sparkles size={14} /> GENERATE PATTERN</button><button onClick={() => setPixels(Array(SIZE * SIZE).fill(baseColor))}><Trash2 size={14} /> CLEAR CANVAS</button></div>
+                  <div className="texture-layers"><div className="subheading">MATERIAL LAYERS</div><button className="active"><span className="layer-thumb" style={{ background: baseColor }} /><div><strong>ALBEDO</strong><small>Base color</small></div><Check size={10} /></button><button><span className="layer-thumb normal" /><div><strong>NORMAL</strong><small>Auto generated</small></div><Sparkles size={10} /></button><button><span className="layer-thumb emissive" /><div><strong>EMISSIVE</strong><small>{emission}% strength</small></div><Blend size={10} /></button></div>
+                  <div className="paint-actions"><button onClick={noiseTexture}><Sparkles size={14} /> GENERATE PATTERN</button><button onClick={() => setPixels(Array(textureSize * textureSize).fill(baseColor))}><Trash2 size={14} /> CLEAR CANVAS</button></div>
                 </div>
-                <div className="pixel-editor-shell"><div className="pixel-ruler top">{Array.from({ length: SIZE }, (_, i) => <span key={i}>{i % 4 === 0 ? i : ''}</span>)}</div><div className="pixel-ruler left">{Array.from({ length: SIZE }, (_, i) => <span key={i}>{i % 4 === 0 ? i : ''}</span>)}</div><div className="pixel-canvas" onContextMenu={(event) => event.preventDefault()}>{pixels.map((pixel, index) => <button key={index} style={{ background: pixel }} onPointerDown={() => setPixel(index)} onPointerEnter={(event) => event.buttons === 1 && setPixel(index)} title={`${index % SIZE}, ${Math.floor(index / SIZE)}`} />)}</div><div className="pixel-info">16 × 16 PX <span>·</span> NEAREST FILTER</div></div>
-                <div className="texture-preview-panel"><div className="subheading">MATERIAL PREVIEW</div><div className="texture-small-preview"><ObjectPreview3D shape={shape} color={baseColor} textureData={pixels} /></div><div className="texture-properties"><label><span>Base tint</span><div><input type="color" value={baseColor} onChange={(event) => setBaseColor(event.target.value)} /><code>{baseColor.toUpperCase()}</code></div></label><label><span>Filtering</span><select><option>Nearest · Pixel art</option><option>Linear · Smooth</option></select></label><label><span>Roughness</span><input type="range" defaultValue="72" /></label></div></div>
+                <div className="pixel-editor-shell"><div className="pixel-ruler top" style={{ gridTemplateColumns: `repeat(${textureSize},1fr)` }}>{Array.from({ length: textureSize }, (_, i) => <span key={i}>{i % Math.max(4, textureSize / 4) === 0 ? i : ''}</span>)}</div><div className="pixel-ruler left" style={{ gridTemplateRows: `repeat(${textureSize},1fr)` }}>{Array.from({ length: textureSize }, (_, i) => <span key={i}>{i % Math.max(4, textureSize / 4) === 0 ? i : ''}</span>)}</div><div className={`pixel-canvas ${showPixelGrid ? '' : 'hide-grid'}`} style={{ gridTemplateColumns: `repeat(${textureSize},1fr)` }} onContextMenu={(event) => event.preventDefault()}>{pixels.map((pixel, index) => <button key={index} style={{ background: pixel }} onPointerDown={() => setPixel(index)} onPointerEnter={(event) => event.buttons === 1 && paintTool !== 'fill' && paintTool !== 'picker' && setPixel(index)} title={`${index % textureSize}, ${Math.floor(index / textureSize)}`} />)}</div><div className="pixel-info">{textureSize} × {textureSize} PX <span>·</span> {paintTool.toUpperCase()} <span>·</span> NEAREST</div></div>
+                <div className="texture-preview-panel"><div className="subheading">PBR MATERIAL PREVIEW</div><div className="texture-small-preview"><ObjectPreview3D shape={shape} color={baseColor} textureData={pixels} roughness={roughness} metallic={metallic} emission={emission} /></div><div className="texture-properties"><label><span>Base tint</span><div><input type="color" value={baseColor} onChange={(event) => setBaseColor(event.target.value)} /><code>{baseColor.toUpperCase()}</code></div></label><label><span>Filtering</span><select><option>Nearest · Pixel art</option><option>Linear · Smooth</option><option>Anisotropic ×16</option></select></label><label><span>Roughness <b>{roughness}%</b></span><input type="range" value={roughness} onChange={(event) => setRoughness(Number(event.target.value))} /></label><label><span>Metallic <b>{metallic}%</b></span><input type="range" value={metallic} onChange={(event) => setMetallic(Number(event.target.value))} /></label><label><span>Emission <b>{emission}%</b></span><input type="range" value={emission} onChange={(event) => setEmission(Number(event.target.value))} /></label><div className="material-budget"><Cpu size={12} /><span><strong>GPU READY</strong><small>{pixels.length.toLocaleString()} texels · 3 channels</small></span></div></div></div>
               </div>
             </div>}
 
@@ -216,7 +271,7 @@ export default function ObjectStudio({ initial, onClose, onSave }: Props) {
             </div>
           </aside>
         </div>
-        <footer className="studio-status"><span><i /> OBJECT STUDIO READY</span><span>16 × 16 TEXTURE</span><span>{components.length} COMPONENTS</span><div /><span>OBJECT API 2.4</span><span>BLOCKSMITH 0.9.0</span></footer>
+        <footer className="studio-status"><span><i /> OBJECT STUDIO READY</span><span>{textureSize} × {textureSize} PBR TEXTURE</span><span>{components.length} COMPONENTS</span><div /><span>OBJECT API 2.4</span><span>BLOCKSMITH 0.9.0</span></footer>
       </section>
     </div>
   )

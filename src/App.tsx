@@ -24,6 +24,18 @@ const initialObjects: SceneObject[] = [
   { id: 'camera', name: 'Main Camera', kind: 'camera', visible: true, parent: 'world', position: [13, 11, 15], rotation: [-28, 40, 0], scale: [1, 1, 1] },
 ]
 
+const defaultWorldSettings: WorldSettings = {
+  seed: 481516,
+  chunkSize: 12,
+  renderDistance: 2,
+  biome: 'Meadow',
+  infinite: true,
+  weather: 'Clear',
+  weatherIntensity: 65,
+  timeOfDay: 14,
+  windSpeed: 28,
+}
+
 const assets: AssetItem[] = [
   { id: 'grass', name: 'Grass Block', type: 'block', color: '#718b42', accent: '#6e4e34' },
   { id: 'dirt', name: 'Dirt Block', type: 'block', color: '#78553a', accent: '#9b714b' },
@@ -207,12 +219,15 @@ function App() {
     try { return JSON.parse(window.localStorage.getItem('blocksmith.customAssets') ?? '[]') as CustomAsset[] } catch { return [] }
   })
   const [worldSettings, setWorldSettings] = useState<WorldSettings>(() => {
-    try { return JSON.parse(window.localStorage.getItem('blocksmith.worldSettings') ?? '') as WorldSettings } catch { return { seed: 481516, chunkSize: 12, renderDistance: 2, biome: 'Meadow', infinite: true } }
+    try { return { ...defaultWorldSettings, ...JSON.parse(window.localStorage.getItem('blocksmith.worldSettings') ?? '{}') } as WorldSettings } catch { return defaultWorldSettings }
   })
   const [worldStats, setWorldStats] = useState({ chunks: 25, blocks: 14400, center: '0, 0' })
   const [studioOpen, setStudioOpen] = useState(false)
   const [studioInitial, setStudioInitial] = useState<CustomAsset | undefined>()
   const [transformTool, setTransformTool] = useState<'select' | 'move' | 'rotate' | 'scale'>('move')
+  const [transformSpace, setTransformSpace] = useState<'world' | 'local'>('world')
+  const [snapEnabled, setSnapEnabled] = useState(true)
+  const [snapSize, setSnapSize] = useState(1)
   const [playing, setPlaying] = useState(false)
   const [cameraMode, setCameraMode] = useState<'perspective' | 'top'>('perspective')
   const [bottomTab, setBottomTab] = useState<'assets' | 'scripts' | 'console'>('assets')
@@ -275,7 +290,7 @@ function App() {
 
   const saveCustomAsset = (asset: CustomAsset) => {
     setCustomAssets((items) => items.some((item) => item.id === asset.id) ? items.map((item) => item.id === asset.id ? asset : item) : [asset, ...items])
-    setObjects((items) => items.map((object) => object.customAssetId === asset.id ? { ...object, name: asset.name, color: asset.color, shape: asset.shape, textureData: asset.textureData, pythonCode: asset.pythonCode, javaCode: asset.javaCode, components: asset.components } : object))
+    setObjects((items) => items.map((object) => object.customAssetId === asset.id ? { ...object, name: asset.name, color: asset.color, shape: asset.shape, textureData: asset.textureData, pythonCode: asset.pythonCode, javaCode: asset.javaCode, components: asset.components, roughness: asset.roughness, metallic: asset.metallic, emission: asset.emission } : object))
     setAssetType('custom')
     setBottomTab('assets')
     setSaved(false)
@@ -320,6 +335,9 @@ function App() {
       pythonCode: asset.pythonCode,
       javaCode: asset.javaCode,
       components: asset.components,
+      roughness: asset.roughness,
+      metallic: asset.metallic,
+      emission: asset.emission,
     }
     setObjects((items) => [...items, next])
     setSelectedId(id)
@@ -433,8 +451,9 @@ function App() {
           <IconButton title="Scale tool (R)" active={transformTool === 'scale'} onClick={() => setTransformTool('scale')}><Maximize2 size={17} /></IconButton>
         </div>
         <div className="toolbar-divider" />
-        <button className="toolbar-select">GLOBAL <ChevronDown size={13} /></button>
-        <button className="toolbar-select"><Grid3X3 size={14} /> 1.0 <ChevronDown size={13} /></button>
+        <button className="toolbar-select" onClick={() => setTransformSpace(transformSpace === 'world' ? 'local' : 'world')} title="Toggle world/local transform orientation">{transformSpace.toUpperCase()} <ChevronDown size={13} /></button>
+        <button className={`toolbar-select ${snapEnabled ? 'snap-active' : ''}`} onClick={() => setSnapEnabled(!snapEnabled)} title="Toggle transform snapping"><Grid3X3 size={14} /> SNAP {snapSize.toFixed(1)}</button>
+        <button className="snap-step" onClick={() => setSnapSize(snapSize === 1 ? .5 : snapSize === .5 ? .25 : 1)} title="Change snap increment"><ChevronDown size={12} /></button>
         <button className="object-studio-trigger" onClick={() => openObjectStudio()}><Paintbrush size={14} /> OBJECT STUDIO <span>NEW</span></button>
         <div className="play-controls">
           <IconButton title={playing ? 'Stop preview' : 'Play current scene'} active={playing} onClick={() => { setPlaying(!playing); setCenterTab('scene'); notify(!playing ? 'Game preview started · WASD to move' : 'Game preview stopped') }}>{playing ? <Square size={14} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</IconButton>
@@ -442,6 +461,7 @@ function App() {
           <IconButton title="Debug scene" onClick={() => notify('Debug overlay enabled')}><Bug size={17} /></IconButton>
         </div>
         <div className="toolbar-spacer" />
+        <button className={`weather-pill weather-${worldSettings.weather.toLowerCase()}`} onClick={() => { setSelectedId('world'); notify('Weather controls opened in the Inspector') }}><Cloud size={13} /><span>{worldSettings.weather.toUpperCase()}</span><small>{String(Math.floor(worldSettings.timeOfDay)).padStart(2, '0')}:00</small></button>
         <span className="runtime-pill"><span /> PYTHON 3.12</span>
         <IconButton title="Command palette"><Search size={17} /></IconButton>
         <IconButton title={leftCollapsed ? 'Show hierarchy' : 'Hide hierarchy'} active={leftCollapsed} onClick={() => setLeftCollapsed(!leftCollapsed)}><Menu size={17} /></IconButton>
@@ -489,7 +509,7 @@ function App() {
 
           <div className="editor-stage">
             {centerTab === 'scene' ? <>
-              <Viewport3D objects={objects} selectedId={selectedId} playing={playing} cameraMode={cameraMode} worldSettings={worldSettings} onWorldStats={setWorldStats} onSelect={setSelectedId} onDropAsset={addAsset} />
+              <Viewport3D objects={objects} selectedId={selectedId} playing={playing} cameraMode={cameraMode} worldSettings={worldSettings} transformTool={transformTool} transformSpace={transformSpace} snapEnabled={snapEnabled} snapSize={snapSize} onWorldStats={setWorldStats} onSelect={setSelectedId} onDropAsset={addAsset} onTransform={(id, patch) => { setObjects((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item)); setSaved(false) }} />
               {!playing && <div className="viewport-bar">
                 <button className="view-mode" onClick={() => setCameraMode(cameraMode === 'perspective' ? 'top' : 'perspective')}><BoxSelect size={14} /> {cameraMode === 'top' ? 'TOP' : 'PERSPECTIVE'} <ChevronDown size={12} /></button>
                 <span className="viewport-divider" />
@@ -499,8 +519,8 @@ function App() {
                 <span className="viewport-divider" />
                 <button className="camera-speed">CAMERA <strong>4.0</strong></button>
               </div>}
-              {!playing && <><div className="viewport-help"><MousePointer2 size={13} /> LEFT SELECT <span>·</span> ALT + DRAG ORBIT <span>·</span> SCROLL ZOOM <span>·</span> PAN TO STREAM CHUNKS</div><div className="axis-gizmo"><b className="axis-y">Y</b><b className="axis-z">Z</b><b className="axis-x">X</b><i /></div><div className="world-stream-stats"><div><InfinityIcon size={14} /><span><strong>INFINITE WORLD</strong><small>CHUNK {worldStats.center}</small></span></div><div><b>{worldStats.chunks}</b><small>LOADED</small></div><div><b>{worldStats.blocks.toLocaleString()}</b><small>BLOCKS</small></div><i /></div></>}
-              {playing && <><div className="play-overlay"><span><Play size={12} fill="currentColor" /> PLAY MODE</span><small>WASD move · World streams as you explore</small><button onClick={() => setPlaying(false)}>EXIT PLAY</button></div><div className="game-hud"><div className="hud-crosshair"><i /><b /></div><div className="hud-top"><span className="hearts">♥ ♥ ♥ ♥ ♥</span><span><InfinityIcon size={12} /> CHUNK {worldStats.center}</span></div><div className="hotbar">{['grass','dirt','stone','sand','water','bedrock'].map((item, index) => <div className={index === 0 ? 'active' : ''} key={item}><span className={`hud-block ${item}`} /><small>{index + 1}</small></div>)}</div><span className="play-tip">WASD TO MOVE · WORLD GENERATES FOREVER</span></div></>}
+              {!playing && <><div className="viewport-help"><MousePointer2 size={13} /> LEFT SELECT <span>·</span> ALT + DRAG ORBIT <span>·</span> SCROLL ZOOM <span>·</span> PAN TO STREAM CHUNKS</div><div className="axis-gizmo"><b className="axis-y">Y</b><b className="axis-z">Z</b><b className="axis-x">X</b><i /></div><div className="world-stream-stats"><div><InfinityIcon size={14} /><span><strong>INFINITE WORLD</strong><small>CHUNK {worldStats.center}</small></span></div><div><b>{worldStats.chunks}</b><small>LOADED</small></div><div><b>{worldStats.blocks.toLocaleString()}</b><small>BLOCKS</small></div><i /></div><div className={`transform-hint tool-${transformTool}`}>{transformTool === 'move' ? <Move3D size={13} /> : transformTool === 'rotate' ? <Rotate3D size={13} /> : transformTool === 'scale' ? <Maximize2 size={13} /> : <MousePointer2 size={13} />}<span><strong>{transformTool.toUpperCase()} GIZMO</strong><small>{transformSpace.toUpperCase()} · {snapEnabled ? `${snapSize} SNAP` : 'FREE'}</small></span></div></>}
+              {playing && <><div className="play-overlay"><span><Play size={12} fill="currentColor" /> PLAY MODE</span><small>WASD move · World streams as you explore</small><button onClick={() => setPlaying(false)}>EXIT PLAY</button></div><div className="game-hud"><div className="hud-crosshair"><i /><b /></div><div className="hud-top"><span className="hearts">♥ ♥ ♥ ♥ ♥</span><span><Cloud size={12} /> {worldSettings.weather.toUpperCase()} · {String(Math.floor(worldSettings.timeOfDay)).padStart(2, '0')}:00 <InfinityIcon size={12} /> CHUNK {worldStats.center}</span></div><div className="hotbar">{['grass','dirt','stone','sand','water','bedrock'].map((item, index) => <div className={index === 0 ? 'active' : ''} key={item}><span className={`hud-block ${item}`} /><small>{index + 1}</small></div>)}</div><span className="play-tip">WASD TO MOVE · WORLD GENERATES FOREVER</span></div></>}
             </> : <div className="code-editor">
               <div className="code-toolbar"><span><Braces size={15} /> PYTHON</span><small>player_controller.py</small><div /><button onClick={runScript}><Play size={13} fill="currentColor" /> RUN SCRIPT</button></div>
               <div className="code-breadcrumb"><span>scripts</span><ChevronRight size={12} /><span>player_controller.py</span><ChevronRight size={12} /><strong>ValleyPlayer</strong></div>
@@ -592,6 +612,17 @@ function App() {
                 <label><span>Chunk size</span><select value={worldSettings.chunkSize} onChange={(event) => setWorldSettings({ ...worldSettings, chunkSize: Number(event.target.value) })}><option value="8">8 × 8</option><option value="12">12 × 12</option><option value="16">16 × 16</option></select></label>
                 <label><span>Render distance</span><input type="range" min="1" max="3" value={worldSettings.renderDistance} onChange={(event) => setWorldSettings({ ...worldSettings, renderDistance: Number(event.target.value) })} /><b className="range-value">{worldSettings.renderDistance} chunks</b></label>
                 <div className="stream-summary"><span><Database size={13} /> {worldStats.chunks} chunks loaded</span><span>{worldStats.blocks.toLocaleString()} generated blocks</span></div>
+              </div>
+            </section>}
+
+            {(selected.kind === 'world' || selected.kind === 'ground') && <section className="inspector-section open weather-section">
+              <header><ChevronDown size={13} /><Cloud size={14} /><strong>WEATHER & ATMOSPHERE</strong><span className={`weather-state ${worldSettings.weather.toLowerCase()}`}>{worldSettings.weather.toUpperCase()}</span></header>
+              <div className="section-body property-list">
+                <label><span>Weather preset</span><select value={worldSettings.weather} onChange={(event) => setWorldSettings({ ...worldSettings, weather: event.target.value as WorldSettings['weather'] })}><option>Clear</option><option>Rain</option><option>Snow</option><option>Storm</option></select></label>
+                <label><span>Time of day</span><input type="range" min="0" max="24" step=".25" value={worldSettings.timeOfDay} onChange={(event) => setWorldSettings({ ...worldSettings, timeOfDay: Number(event.target.value) })} /><b className="range-value">{String(Math.floor(worldSettings.timeOfDay)).padStart(2, '0')}:{worldSettings.timeOfDay % 1 ? '30' : '00'}</b></label>
+                <label><span>Intensity</span><input type="range" min="0" max="100" value={worldSettings.weatherIntensity} onChange={(event) => setWorldSettings({ ...worldSettings, weatherIntensity: Number(event.target.value) })} /><b className="range-value">{worldSettings.weatherIntensity}%</b></label>
+                <label><span>Wind speed</span><input type="range" min="0" max="100" value={worldSettings.windSpeed} onChange={(event) => setWorldSettings({ ...worldSettings, windSpeed: Number(event.target.value) })} /><b className="range-value">{worldSettings.windSpeed} km/h</b></label>
+                <div className="weather-preview-row"><span className="weather-orb"><Sun size={15} /></span><div><strong>PHYSICALLY BASED SKY</strong><small>Procedural clouds · fog · precipitation</small></div></div>
               </div>
             </section>}
 

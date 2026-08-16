@@ -16,6 +16,10 @@ CHUNK_SIZE = max(6, min(16, int(WORLD.get("chunkSize", 8))))
 RENDER_DISTANCE = max(1, min(3, int(WORLD.get("renderDistance", 2))))
 WORLD_SEED = int(WORLD.get("seed", 481516))
 BIOME = WORLD.get("biome", "Meadow")
+WEATHER = WORLD.get("weather", "Clear")
+WEATHER_INTENSITY = int(WORLD.get("weatherIntensity", 65))
+WIND_SPEED = int(WORLD.get("windSpeed", 28))
+TIME_OF_DAY = float(WORLD.get("timeOfDay", 14))
 
 app = Ursina(
     title=PROJECT.get("name", "Stoneveil Valley"),
@@ -108,9 +112,14 @@ class InfiniteWorld:
 
 
 world = InfiniteWorld()
-Sky(color=color.rgb(166, 190, 170))
+sky_colors = {
+    "Clear": color.rgb(166, 190, 170), "Rain": color.rgb(112, 135, 137),
+    "Snow": color.rgb(180, 193, 195), "Storm": color.rgb(72, 82, 89),
+}
+Sky(color=sky_colors.get(WEATHER, sky_colors["Clear"]))
 sun = DirectionalLight(shadows=True)
 sun.look_at(Vec3(1, -1, -1))
+sun.color = color.rgb(255, 196, 139) if TIME_OF_DAY < 8 or TIME_OF_DAY > 18 else color.rgb(255, 244, 207)
 AmbientLight(color=color.rgba(150, 150, 150, 90))
 player = FirstPersonController(position=(1, 8, 1), speed=5, jump_height=1.25)
 player.cursor.color = color.rgb(230, 177, 76)
@@ -120,6 +129,18 @@ help_text = Text(
     origin=(0, 0), y=-.47, scale=.72, color=color.rgba(235, 238, 233, 180)
 )
 chunk_label = Text("GENERATING WORLD...", x=-.86, y=.46, scale=.62, color=color.rgba(230, 235, 228, 170))
+weather_label = Text(f"{WEATHER.upper()}   {int(TIME_OF_DAY):02d}:00", x=.68, y=.46, scale=.62, color=color.rgba(230, 235, 228, 170))
+weather_particles = []
+if WEATHER in ("Rain", "Snow", "Storm"):
+    particle_count = min(260, 40 + WEATHER_INTENSITY * 2)
+    for index in range(particle_count):
+        snow = WEATHER == "Snow"
+        drop = Entity(
+            model="cube", color=color.rgba(225, 240, 242, 205) if snow else color.rgba(150, 196, 211, 175),
+            scale=(.035, .035, .035) if snow else (.018, .42, .018),
+            position=(((index * 37) % 42) - 21, ((index * 19) % 22) + 2, ((index * 53) % 42) - 21),
+        )
+        weather_particles.append(drop)
 
 
 def add_authored_objects():
@@ -154,6 +175,18 @@ def input(key):
 
 def update():
     world.stream(player.position)
+    snow = WEATHER == "Snow"
+    fall_speed = 2.4 if snow else 15.0
+    wind = WIND_SPEED * (.008 if snow else .014)
+    for index, particle in enumerate(weather_particles):
+        particle.y -= time.dt * fall_speed
+        particle.x += time.dt * wind
+        if particle.y < player.y - 2 or abs(particle.x - player.x) > 24 or abs(particle.z - player.z) > 24:
+            particle.position = (
+                player.x + ((index * 37) % 42) - 21,
+                player.y + ((index * 19) % 20) + 8,
+                player.z + ((index * 53) % 42) - 21,
+            )
 
 
 app.run()

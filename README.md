@@ -6,6 +6,14 @@ A professional Unity-style 3D editor prototype focused on Minecraft-like voxel g
 
 ## Advanced editor features
 
+### Unity-style scene authoring
+
+- Real in-viewport transform gizmos powered by Three.js TransformControls
+- X/Y/Z arrows for translation, colored rotation rings and axis scale handles
+- World/local coordinate-space switching
+- Configurable translation, rotation and scale snapping
+- Scene hierarchy, Inspector, play mode, project browser, console and 50-step undo history
+
 ### Infinite voxel worlds
 
 - Deterministic chunk generation from a configurable world seed
@@ -16,15 +24,27 @@ A professional Unity-style 3D editor prototype focused on Minecraft-like voxel g
 - Instanced Three.js terrain rendering for thousands of visible voxel columns
 - Matching infinite chunk manager in the exported Python game runtime
 
+### Dynamic weather and atmosphere
+
+- Clear, rain, snow and storm presets
+- Real-time rain/snow particle simulation and wind
+- Moving procedural cloud layer
+- Time-of-day sun position, color and intensity
+- Dynamic sky colors, fog distance and storm lightning
+- Weather controls in the World Inspector and matching exported-runtime precipitation
+
 ### Object Studio
 
 The built-in **Object Studio** creates complete game assets without leaving the editor:
 
 - Voxel blocks, stairs, swords, pickaxes, tools and inventory items
 - Real-time rotatable 3D material preview
-- 16×16 pixel texture painter with palettes and pattern generation
-- PNG/JPEG texture importing and nearest-neighbor conversion
-- Custom tint, roughness and filtering controls
+- 16×16, 32×32 and 64×64 texture resolutions
+- Brush, flood-fill, eraser, eyedropper and mirrored painting tools
+- Toggleable pixel grid, palettes and procedural pattern generation
+- PNG/JPEG importing with nearest-neighbor resampling
+- Albedo, generated normal and emissive material-layer workflow
+- Live roughness, metallic, emission, tint and filtering controls
 - Drag-and-drop component composition
 - Collider, breakable, inventory, multiplayer sync, audio and particle components
 - Python and Java behavior editors for every custom object
@@ -46,6 +66,15 @@ The built-in **Object Studio** creates complete game assets without leaving the 
 - Windows, Linux and web build-target interface
 
 ## Run locally
+
+### Windows one-click launcher
+
+1. Install the current [Node.js LTS](https://nodejs.org/) release once.
+2. Double-click `run_blocksmith_editor.bat` from the project folder—even when the project is on another drive such as `D:`.
+3. On the first run, the launcher installs dependencies; it then starts the editor at `http://localhost:5173` and opens it in your browser.
+4. Keep the launcher window open; press `Ctrl+C` there to stop the editor.
+
+### Command line
 
 ```bash
 npm install

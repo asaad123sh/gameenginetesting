@@ -23,6 +23,9 @@ export interface SceneObject {
   pythonCode?: string
   javaCode?: string
   components?: string[]
+  roughness?: number
+  metallic?: number
+  emission?: number
 }
 
 export interface AssetItem {
@@ -37,6 +40,9 @@ export interface AssetItem {
   pythonCode?: string
   javaCode?: string
   components?: string[]
+  roughness?: number
+  metallic?: number
+  emission?: number
 }
 
 export interface CustomAsset extends AssetItem {
@@ -54,4 +60,8 @@ export interface WorldSettings {
   renderDistance: number
   biome: 'Meadow' | 'Highlands' | 'Desert'
   infinite: boolean
+  weather: 'Clear' | 'Rain' | 'Snow' | 'Storm'
+  weatherIntensity: number
+  timeOfDay: number
+  windSpeed: number
 }

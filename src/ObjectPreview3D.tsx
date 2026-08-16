@@ -8,6 +8,9 @@ interface Props {
   color: string
   textureData: string[]
   wireframe?: boolean
+  roughness?: number
+  metallic?: number
+  emission?: number
 }
 
 function textureFromPixels(pixels: string[]) {
@@ -70,7 +73,7 @@ function buildModel(shape: CustomShape, material: THREE.MeshStandardMaterial) {
   return group
 }
 
-export default function ObjectPreview3D({ shape, color, textureData, wireframe = false }: Props) {
+export default function ObjectPreview3D({ shape, color, textureData, wireframe = false, roughness = 65, metallic = 5, emission = 0 }: Props) {
   const mountRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<THREE.Scene | null>(null)
   const modelRef = useRef<THREE.Group | null>(null)
@@ -140,11 +143,11 @@ export default function ObjectPreview3D({ shape, color, textureData, wireframe =
     if (!scene) return
     if (modelRef.current) scene.remove(modelRef.current)
     const texture = textureFromPixels(textureData)
-    const material = new THREE.MeshStandardMaterial({ color, map: texture, roughness: .65, metalness: shape === 'sword' || shape === 'pickaxe' ? .35 : .05, wireframe })
+    const material = new THREE.MeshStandardMaterial({ color, map: texture, roughness: roughness / 100, metalness: metallic / 100, emissive: new THREE.Color(color), emissiveIntensity: emission / 180, wireframe })
     const model = buildModel(shape, material)
     scene.add(model)
     modelRef.current = model
-  }, [color, shape, textureData, wireframe])
+  }, [color, emission, metallic, roughness, shape, textureData, wireframe])
 
   return <div className="object-preview-canvas" ref={mountRef} />
 }
