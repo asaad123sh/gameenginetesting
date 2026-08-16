@@ -1,21 +1,49 @@
 # Blocksmith Studio
 
-A focused, Unity-style 3D editor prototype for building Minecraft-like voxel games with drag-and-drop tools and small Python scripts.
+A professional Unity-style 3D editor prototype focused on Minecraft-like voxel games, infinite procedural worlds, drag-and-drop creation, and lightweight Python or Java behaviors.
 
-![Status](https://img.shields.io/badge/status-interactive%20prototype-d39a3f)
+![Status](https://img.shields.io/badge/status-advanced%20interactive%20prototype-d39a3f)
 
-## What works
+## Advanced editor features
 
-- Interactive Three.js voxel scene with orbit, pan, zoom, object picking, perspective and top-down cameras
-- Scene hierarchy, visibility controls, object selection, duplication, deletion and transform editing
-- Drag assets from the content browser into the world; double-click assets for quick placement
-- Grass, dirt, stone, sand, water and bedrock blocks plus player, tree and spawn prefabs
-- Python code workspace and simulated compile console
-- First-person and top-down workflow controls
-- Play/stop preview state and editor keyboard shortcuts
-- Build window for Windows, Linux and web targets
-- Real downloadable project archive containing scene JSON, Python source and a Windows PyInstaller build script
-- Exported Windows project runs as an editable first-person voxel game with Ursina
+### Infinite voxel worlds
+
+- Deterministic chunk generation from a configurable world seed
+- Live chunk streaming as the editor camera or player moves
+- Automatic unloading and regeneration of distant chunks
+- Adjustable chunk size and render distance
+- Meadow, Highlands and Desert terrain profiles
+- Instanced Three.js terrain rendering for thousands of visible voxel columns
+- Matching infinite chunk manager in the exported Python game runtime
+
+### Object Studio
+
+The built-in **Object Studio** creates complete game assets without leaving the editor:
+
+- Voxel blocks, stairs, swords, pickaxes, tools and inventory items
+- Real-time rotatable 3D material preview
+- 16×16 pixel texture painter with palettes and pattern generation
+- PNG/JPEG texture importing and nearest-neighbor conversion
+- Custom tint, roughness and filtering controls
+- Drag-and-drop component composition
+- Collider, breakable, inventory, multiplayer sync, audio and particle components
+- Python and Java behavior editors for every custom object
+- Persistent custom asset library
+- Live editing of every placed instance from the Inspector
+
+### Core game-editor workflow
+
+- Real-time Three.js scene viewport with orbit, pan, zoom and picking
+- Scene hierarchy, visibility controls and object inspector
+- Real 50-step undo/redo history with keyboard shortcuts
+- Position, rotation and scale authoring
+- Perspective and top-down camera modes
+- Drag assets into the streamed world
+- Player, trees, spawn points and six built-in block materials
+- Python workspace, compile console, project browser and script attachments
+- Play mode with WASD movement, jumping, third-person camera, HUD and hotbar
+- Local project saving and autosave
+- Windows, Linux and web build-target interface
 
 ## Run locally
 
@@ -43,22 +71,31 @@ npm run preview
 | `Ctrl/Cmd + D` | Duplicate selected object |
 | `Delete` | Delete selected object |
 
-## Creating a Windows executable
+## Native single-file Windows builds
 
-1. Click **Build** in the editor and select **Windows**.
-2. Click **Build project** to download the generated ZIP.
-3. Extract it on a Windows computer with Python 3.11+ installed.
-4. Run `run_game.bat` to test or `build_windows.bat` to package it.
-5. The standalone executable is written to `dist\StoneveilValley\StoneveilValley.exe`.
+1. Click **Build** and select **Windows — Single portable .exe**.
+2. Click **Build release** to download the generated native-build kit.
+3. Extract it on Windows with Python 3.11+ and a supported C compiler.
+4. Run `compile_single_exe.bat`.
+5. The Nuitka native backend produces one `StoneveilValley.exe`, rather than a PyInstaller directory bundle.
 
-The exported runtime uses [Ursina](https://www.ursinaengine.org/) and PyInstaller. It includes WASD movement, jumping, block breaking/placement, six block slots and all placed editor blocks and tree prefabs.
+The browser edition cannot execute a Windows compiler inside the browser sandbox, so it prepares the complete deterministic build kit. A native Blocksmith desktop host can run the same command directly and return the `.exe` from the Build window.
+
+The archive contains:
+
+- Infinite-world project settings and scene JSON
+- Self-contained Ursina game source with chunk streaming
+- Custom object definitions and embedded pixel texture data
+- Separate Python and Java source for every custom object
+- A Nuitka one-file native compilation recipe
 
 ## Architecture
 
-- **React + TypeScript** — editor UI and state
-- **Three.js** — real-time 3D viewport and object picking
-- **JSZip** — generated game-project downloads
-- **Python + Ursina** — runnable exported game runtime
-- **PyInstaller** — Windows executable packaging
+- **React + TypeScript** — editor shell, inspector, project state and Object Studio
+- **Three.js** — scene viewport, instanced chunk terrain and real-time object previews
+- **JSZip** — generated build-kit downloads
+- **Python + Ursina** — runnable exported voxel game runtime
+- **Java 21 bindings** — per-object gameplay source authoring
+- **Nuitka** — native single-file Windows compilation backend
 
-This repository is an ambitious editor MVP rather than a production replacement for Unity. The next production milestones would be project persistence, native desktop filesystem access, chunked voxel meshing, undo history, a real Python bridge, asset import, physics authoring and platform build workers.
+This remains an advanced editor MVP rather than a production replacement for Unity. Production milestones include a desktop filesystem host, background chunk workers, greedy voxel meshing, real physics authoring, compiled Java runtime integration, multiplayer servers, undo history, binary asset databases and managed cloud build workers.
